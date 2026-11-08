@@ -1,0 +1,27 @@
+#!/bin/sh
+# ----------------------------------------------------------------------------
+# Maven Wrapper Shell Script (targeting Maven 3.9.9)
+# ----------------------------------------------------------------------------
+
+set -e
+
+BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+WRAPPER_JAR="$BASE_DIR/.mvn/wrapper/maven-wrapper.jar"
+WRAPPER_LAUNCHER="org.apache.maven.wrapper.MavenWrapperMain"
+
+if [ -z "$JAVA_HOME" ]; then
+    JAVACMD="java"
+else
+    JAVACMD="$JAVA_HOME/bin/java"
+fi
+
+if [ -f "$WRAPPER_JAR" ]; then
+    exec "$JAVACMD" $MAVEN_OPTS -Dmaven.multiModuleProjectDirectory="$BASE_DIR" -classpath "$WRAPPER_JAR" "$WRAPPER_LAUNCHER" "$@"
+fi
+
+if command -v mvn >/dev/null 2>&1; then
+    exec mvn "$@"
+fi
+
+echo "Error: Neither $WRAPPER_JAR nor system mvn is available." >&2
+exit 1

@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: ledgerline-backend-test
+  datasource:
+    # Overridden dynamically by Testcontainers MySQL during integration testing
+    url: jdbc:tc:mysql:8.0.36:///ledgerline_test?TC_IN_MEMORY=false
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+    username: test
+    password: test
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 10
+      connection-timeout: 30000
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: false
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+ledgerline:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:test-only-ledgerline-integration-secret-2026}
+      expiration-ms: 3600000 # 1 hour for test
+  idempotency:
+    ttl-hours: 1
