@@ -13,6 +13,7 @@ import com.ledgerline.domain.reconciliation.service.ReconciliationService;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -21,6 +22,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/v1/auditor")
 @PreAuthorize("hasRole('AUDITOR')")
+@Transactional(readOnly = true)
 public class AuditorController {
 
     private final JournalTransactionRepository journalTransactionRepository;

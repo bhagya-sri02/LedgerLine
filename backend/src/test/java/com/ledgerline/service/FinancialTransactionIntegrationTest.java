@@ -1,6 +1,8 @@
 package com.ledgerline.service;
 
+import com.ledgerline.common.exception.AccountFrozenException;
 import com.ledgerline.common.exception.InsufficientFundsException;
+import com.ledgerline.common.exception.InvalidAmountException;
 import com.ledgerline.common.exception.PayloadMismatchException;
 import com.ledgerline.common.exception.UnbalancedTransactionException;
 import com.ledgerline.domain.account.entity.Account;
@@ -24,6 +26,8 @@ import com.ledgerline.domain.ledger.repository.JournalTransactionRepository;
 import com.ledgerline.domain.ledger.repository.LedgerEntryRepository;
 import com.ledgerline.domain.ledger.service.AccountTransactionService;
 import com.ledgerline.domain.ledger.service.LedgerPostingService;
+import com.ledgerline.domain.reconciliation.dto.ReconciliationSummaryDto;
+import com.ledgerline.domain.reconciliation.service.ReconciliationService;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,6 +72,9 @@ public class FinancialTransactionIntegrationTest {
 
     @Autowired
     private AuditLogRepository auditLogRepository;
+
+    @Autowired
+    private ReconciliationService reconciliationService;
 
     private User testUser;
     private static final int SCALE = 4;
@@ -493,5 +500,159 @@ public class FinancialTransactionIntegrationTest {
         assertEquals(testUser.getId(), logEntry.getActor().getId());
         assertNotNull(logEntry.getMetadata());
         assertFalse(logEntry.getMetadata().contains("password"), "Audit logs must never contain sensitive credentials");
+    }
+
+    // =========================================================================
+    // Edge Cases: Zero, Negative, Closed, Precision, Large Amounts & Reconciliation
+    // =========================================================================
+
+    @Test
+    @DisplayName("13. Zero amount transactions are rejected with InvalidAmountException")
+    void testZeroAmountTransactionRejected() {
+        Account acc = createAccount("ACC-ZERO", new BigDecimal("100.00"), "USD");
+
+        assertThrows(InvalidAmountException.class, () ->
+                accountTransactionService.executeDeposit(
+                        DepositCommand.builder().accountId(acc.getId()).amount(BigDecimal.ZERO).currency("USD").build(),
+                        testUser, "zero-dep-" + UUID.randomUUID()
+                )
+        );
+
+        assertThrows(InvalidAmountException.class, () ->
+                accountTransactionService.executeWithdrawal(
+                        WithdrawalCommand.builder().accountId(acc.getId()).amount(new BigDecimal("0.0000")).currency("USD").build(),
+                        testUser, "zero-wth-" + UUID.randomUUID()
+                )
+        );
+    }
+
+    @Test
+    @DisplayName("14. Negative amount transactions are rejected with InvalidAmountException")
+    void testNegativeAmountTransactionRejected() {
+        Account acc = createAccount("ACC-NEG", new BigDecimal("100.00"), "USD");
+
+        assertThrows(InvalidAmountException.class, () ->
+                accountTransactionService.executeDeposit(
+                        DepositCommand.builder().accountId(acc.getId()).amount(new BigDecimal("-50.00")).currency("USD").build(),
+                        testUser, "neg-dep-" + UUID.randomUUID()
+                )
+        );
+
+        assertThrows(InvalidAmountException.class, () ->
+                accountTransactionService.executeWithdrawal(
+                        WithdrawalCommand.builder().accountId(acc.getId()).amount(new BigDecimal("-15.00")).currency("USD").build(),
+                        testUser, "neg-wth-" + UUID.randomUUID()
+                )
+        );
+    }
+
+    @Test
+    @DisplayName("15. Closed account transactions are rejected with AccountFrozenException")
+    void testClosedAccountTransactionRejected() {
+        Account acc = createAccount("ACC-CLOSED", new BigDecimal("100.00"), "USD");
+        acc.setStatus(AccountStatus.CLOSED);
+        accountRepository.save(acc);
+
+        assertThrows(AccountFrozenException.class, () ->
+                accountTransactionService.executeDeposit(
+                        DepositCommand.builder().accountId(acc.getId()).amount(new BigDecimal("50.00")).currency("USD").build(),
+                        testUser, "closed-dep-" + UUID.randomUUID()
+                )
+        );
+
+        assertThrows(AccountFrozenException.class, () ->
+                accountTransactionService.executeWithdrawal(
+                        WithdrawalCommand.builder().accountId(acc.getId()).amount(new BigDecimal("20.00")).currency("USD").build(),
+                        testUser, "closed-wth-" + UUID.randomUUID()
+                )
+        );
+    }
+
+    @Test
+    @DisplayName("16. High-precision decimal amounts are evaluated with exact 4-decimal precision")
+    void testHighPrecisionDecimalRounding() {
+        Account acc = createAccount("ACC-PRECISION", new BigDecimal("0.0000"), "USD");
+
+        accountTransactionService.executeDeposit(
+                DepositCommand.builder().accountId(acc.getId()).amount(new BigDecimal("123.4567")).currency("USD").build(),
+                testUser, "prec-dep-" + UUID.randomUUID()
+        );
+
+        Account reloaded = accountRepository.findById(acc.getId()).orElseThrow();
+        assertEquals(new BigDecimal("123.4567"), reloaded.getBalance());
+
+        accountTransactionService.executeWithdrawal(
+                WithdrawalCommand.builder().accountId(acc.getId()).amount(new BigDecimal("23.4567")).currency("USD").build(),
+                testUser, "prec-wth-" + UUID.randomUUID()
+        );
+
+        Account finalAcc = accountRepository.findById(acc.getId()).orElseThrow();
+        assertEquals(new BigDecimal("100.0000"), finalAcc.getBalance());
+    }
+
+    @Test
+    @DisplayName("17. Extremely large transaction amounts validate cleanly against balance without overflow")
+    void testExtremelyLargeAmountHandling() {
+        Account acc = createAccount("ACC-LARGE", new BigDecimal("1000.00"), "USD");
+
+        BigDecimal hugeAmount = new BigDecimal("99999999999999.9999");
+        assertThrows(InsufficientFundsException.class, () ->
+                accountTransactionService.executeWithdrawal(
+                        WithdrawalCommand.builder().accountId(acc.getId()).amount(hugeAmount).currency("USD").build(),
+                        testUser, "large-wth-" + UUID.randomUUID()
+                )
+        );
+
+        Account current = accountRepository.findById(acc.getId()).orElseThrow();
+        assertEquals(new BigDecimal("1000.0000"), current.getBalance());
+    }
+
+    @Test
+    @DisplayName("18. Account reconciliation engine confirms zero discrepancy after multi-account transfer flow")
+    void testReconciliationEngineAfterMultiAccountFlow() {
+        Account accA = createAccount("ACC-FLOW-A", new BigDecimal("0.00"), "USD");
+        Account accB = createAccount("ACC-FLOW-B", new BigDecimal("0.00"), "USD");
+        Account accC = createAccount("ACC-FLOW-C", new BigDecimal("0.00"), "USD");
+
+        // Fund accounts via double-entry deposit
+        accountTransactionService.executeDeposit(
+                DepositCommand.builder().accountId(accA.getId()).amount(new BigDecimal("500.00")).currency("USD").build(),
+                testUser, "flow-dep-A-" + UUID.randomUUID()
+        );
+        accountTransactionService.executeDeposit(
+                DepositCommand.builder().accountId(accB.getId()).amount(new BigDecimal("200.00")).currency("USD").build(),
+                testUser, "flow-dep-B-" + UUID.randomUUID()
+        );
+        accountTransactionService.executeDeposit(
+                DepositCommand.builder().accountId(accC.getId()).amount(new BigDecimal("100.00")).currency("USD").build(),
+                testUser, "flow-dep-C-" + UUID.randomUUID()
+        );
+
+        // Sequence of transfers: A -> B ($100), B -> C ($50), C -> A ($25)
+        accountTransactionService.executeTransfer(
+                TransferCommand.builder().fromAccountId(accA.getId()).toAccountId(accB.getId()).amount(new BigDecimal("100.00")).currency("USD").build(),
+                testUser, "flow-tx-1-" + UUID.randomUUID()
+        );
+        accountTransactionService.executeTransfer(
+                TransferCommand.builder().fromAccountId(accB.getId()).toAccountId(accC.getId()).amount(new BigDecimal("50.00")).currency("USD").build(),
+                testUser, "flow-tx-2-" + UUID.randomUUID()
+        );
+        accountTransactionService.executeTransfer(
+                TransferCommand.builder().fromAccountId(accC.getId()).toAccountId(accA.getId()).amount(new BigDecimal("25.00")).currency("USD").build(),
+                testUser, "flow-tx-3-" + UUID.randomUUID()
+        );
+
+        // Reconcile each account individually against ledger history
+        var reconA = reconciliationService.reconcileAccount(accA.getId());
+        var reconB = reconciliationService.reconcileAccount(accB.getId());
+        var reconC = reconciliationService.reconcileAccount(accC.getId());
+
+        assertTrue(reconA.isBalanced(), "Account A materialized balance must match double-entry ledger history");
+        assertTrue(reconB.isBalanced(), "Account B materialized balance must match double-entry ledger history");
+        assertTrue(reconC.isBalanced(), "Account C materialized balance must match double-entry ledger history");
+
+        assertEquals(new BigDecimal("425.0000"), reconA.getMaterializedBalance()); // 500 - 100 + 25
+        assertEquals(new BigDecimal("250.0000"), reconB.getMaterializedBalance()); // 200 + 100 - 50
+        assertEquals(new BigDecimal("125.0000"), reconC.getMaterializedBalance()); // 100 + 50 - 25
     }
 }

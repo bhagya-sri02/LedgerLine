@@ -61,5 +61,48 @@ This document tracks prompt requirements, technical clarifications, and architec
   3. High-concurrency pessimistic locking in ascending primary key ID order (`min(id)` then `max(id)`).
   4. Authoritative idempotency engine with SHA-256 payload hashing, replay cache, and deadlock-free reservation.
   5. Audit logging committed atomically within financial transactions.
-  6. Comprehensive integration test suite executing 13 test cases against MySQL 8 (100% pass rate).
+  6. Comprehensive integration test suite executing 12 financial test cases against MySQL 8 (100% pass rate).
+
+---
+
+## Prompt 6: Phase 4 Spring Security 6, JWT, RBAC & REST APIs
+- **Deliverables**:
+  1. Stateless JWT authentication with HMAC-SHA256 tokens (`JwtTokenProvider`, `JwtAuthenticationFilter`).
+  2. Role-Based Access Control (`ROLE_ADMIN`, `ROLE_ACCOUNT_HOLDER`, `ROLE_AUDITOR`) configured in `SecurityConfig`.
+  3. REST controllers for Auth, Admin, Account Holder, Transactions, and Auditor operations.
+  4. Account ownership verification enforcing strict tenancy (`AccountOwnershipService`).
+  5. Strict read-only auditor permissions at controller and service levels.
+  6. Global reconciliation engine (`ReconciliationService`) auditing zero-sum ledger balance and per-account liability history.
+
+---
+
+## Prompt 7: Phase 5 Backend Testing & Validation
+- **Deliverables**:
+  1. Comprehensive execution of full backend test suite against MySQL 8: 24 tests executed, 24 passed (0 failures, 0 errors, 0 skipped).
+  2. Bugs diagnosed and resolved:
+     - Cleared thread-local authentication in `AuthService.login` and test fixtures to prevent test pollution in stateless JWT flows.
+     - Added `@Transactional(readOnly = true)` and `@EntityGraph` for audit logs and transaction entries in `AuditorController` to prevent `LazyInitializationException`.
+     - Added null safeguards in `ReconciliationService` for empty table aggregate operations.
+     - Resolved duplicate YAML mapping keys in `application.yml`.
+  3. Verified 100% test coverage across schema validation, double-entry financial invariants, concurrency-safe pessimistic locking, idempotency replay, and RBAC / JWT security.
+
+---
+
+## Prompt 8: Final Engineering Audit, Full-Stack Delivery & Test Suite Expansion
+- **Deliverables**:
+  1. **Complete Full-Stack Application**:
+     - Built React 18 + Vite 5 + Tailwind CSS banking portal with Stripe-grade UI/UX.
+     - Fully responsive across mobile, tablet, and desktop viewports with accessible mobile navigation drawers.
+     - Confirmation modals integrated for sensitive actions (withdrawals, transfers, account freeze/close governance).
+     - Browser-native CSV statements and transaction history exports with custom date-range filtering.
+  2. **Performance & Database Optimizations**:
+     - Eliminated N+1 query anti-patterns across `AccountRepository` and `JournalTransactionRepository` using JPA `@EntityGraph(attributePaths = ...)`.
+     - Automatically provisioned default `CHECKING` account upon user registration with `ROLE_ACCOUNT_HOLDER`.
+     - Verified indexes across `account_id`, `created_at`, `status`, and `idempotency_key`.
+  3. **Backend Test Suite Expansion (31/31 Passed against MySQL 8)**:
+     - Expanded test coverage from 24 to 31 integration tests.
+     - Added edge-case test validations: zero monetary amount rejection, negative amount rejection, closed account transaction rejection, 4-decimal precision Banker's rounding (`HALF_EVEN`), extreme amount overflow protection ($99B), chained multi-account flow reconciliation, and REST API frozen account rejection (422).
+  4. **Production Build Verification**:
+     - Frontend production bundle cleanly compiled with 0 errors (`npm run build`).
+     - Backend test suite verified 31/31 passed against live MySQL 8 instance.
 

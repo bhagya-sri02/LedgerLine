@@ -62,3 +62,14 @@ This document identifies potential security threats to the LedgerLine financial 
 | **Auditor Mutating Financial State** | Critical | Auditor role (`ROLE_AUDITOR`) is strictly restricted to HTTP `GET` endpoints in `SecurityConfig`. Any `POST`, `PUT`, `PATCH`, or `DELETE` request yields `403 Forbidden`. In production, auditor database connections are granted read-only privileges (`GRANT SELECT ON ledgerline.*`). |
 | **Account Holder Accessing Admin APIs** | Critical | Endpoint paths `/api/v1/admin/**` require `hasRole('ADMIN')`. |
 
+---
+
+## 7. Client & Operational Integrity Protections
+
+| Threat | Risk Level | Mitigation Strategy |
+| :--- | :---: | :--- |
+| **Accidental / Erroneous High-Impact Execution** | High | Client-side confirmation dialogs require deliberate user confirmation before submitting irreversible withdrawals, transfers, account freezing, or account closures. |
+| **Rounding Bias & Fractional Siphoning** | High | Standardized on Banker's Rounding (`BigDecimal.setScale(4, RoundingMode.HALF_EVEN)`) across all balance computations to prevent cumulative statistical drift in large transaction volumes. |
+| **N+1 Database Query Starvation DOS** | Medium | JPA `@EntityGraph` eager joins prevent connection pool exhaustion during batch audits and customer transaction queries. |
+| **Client CSRF & Cross-Origin Tampering** | Medium | Stateless JWT storage in memory/session with CORS origin restrictions and pre-flight HTTP `OPTIONS` validation. No session cookies are used. |
+

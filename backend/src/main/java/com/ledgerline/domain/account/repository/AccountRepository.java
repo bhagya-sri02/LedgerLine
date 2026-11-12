@@ -4,6 +4,7 @@ import com.ledgerline.domain.account.entity.Account;
 import com.ledgerline.domain.account.entity.AccountType;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -19,7 +20,11 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     Optional<Account> findByAccountNumber(String accountNumber);
 
+    @EntityGraph(attributePaths = {"user"})
     List<Account> findByUserId(Long userId);
+
+    @EntityGraph(attributePaths = {"user"})
+    List<Account> findAll();
 
     Optional<Account> findByAccountNumberAndAccountType(String accountNumber, AccountType accountType);
 

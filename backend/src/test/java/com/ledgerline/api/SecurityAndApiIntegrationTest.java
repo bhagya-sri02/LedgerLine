@@ -3,7 +3,9 @@ package com.ledgerline.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ledgerline.common.exception.BusinessException;
 import com.ledgerline.domain.account.dto.AccountResponse;
+import com.ledgerline.domain.account.dto.AccountStatusUpdateRequest;
 import com.ledgerline.domain.account.dto.CreateAccountRequest;
+import com.ledgerline.domain.account.entity.AccountStatus;
 import com.ledgerline.domain.account.entity.AccountType;
 import com.ledgerline.domain.account.service.AccountService;
 import com.ledgerline.domain.auth.dto.AuthResponse;
@@ -22,6 +24,7 @@ import com.ledgerline.domain.transaction.dto.DepositRequest;
 import com.ledgerline.domain.transaction.dto.TransferRequest;
 import com.ledgerline.domain.transaction.dto.WithdrawalRequest;
 import com.ledgerline.infrastructure.security.jwt.JwtTokenProvider;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,6 +32,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -109,6 +113,13 @@ public class SecurityAndApiIntegrationTest {
 
         AuthResponse auditorAuth = authService.login(LoginRequest.builder().username("auditor").password("Auditor@123456").build());
         auditorToken = auditorAuth.getToken();
+
+        SecurityContextHolder.clearContext();
+    }
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
     }
 
     private User createAccountHolderUser(String username) {
@@ -124,6 +135,7 @@ public class SecurityAndApiIntegrationTest {
 
     private String loginAndGetToken(String username, String password) {
         AuthResponse auth = authService.login(LoginRequest.builder().username(username).password(password).build());
+        SecurityContextHolder.clearContext();
         return auth.getToken();
     }
 
@@ -446,6 +458,46 @@ public class SecurityAndApiIntegrationTest {
                         .header("Authorization", "Bearer " + auditorToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
+    }
+
+    @Test
+    @DisplayName("12. Admin freezes an account and subsequent withdrawals are rejected with 400 Bad Request")
+    void testFrozenAccountViaRestApi() throws Exception {
+        String holderName = "holder_freeze_" + UUID.randomUUID().toString().substring(0, 8);
+        User holder = createAccountHolderUser(holderName);
+        String holderToken = loginAndGetToken(holderName, "Password@123");
+
+        AccountResponse acc = accountService.createAccount(
+                CreateAccountRequest.builder().userId(holder.getId()).accountType(AccountType.CHECKING).currency("USD").initialDeposit(new BigDecimal("100.00")).build(),
+                adminUser
+        );
+
+        // Admin freezes account
+        AccountStatusUpdateRequest freezeReq = AccountStatusUpdateRequest.builder()
+                .status(AccountStatus.FROZEN)
+                .build();
+
+        mockMvc.perform(put("/api/v1/admin/accounts/" + acc.getId() + "/status")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(freezeReq)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("FROZEN"));
+
+        // User attempts withdrawal -> rejected
+        WithdrawalRequest withdrawReq = WithdrawalRequest.builder()
+                .accountId(acc.getId())
+                .amount(new BigDecimal("25.00"))
+                .currency("USD")
+                .build();
+
+        mockMvc.perform(post("/api/v1/transactions/withdraw")
+                        .header("Authorization", "Bearer " + holderToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(withdrawReq)))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.status").value(422))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("not active")));
     }
 }
 

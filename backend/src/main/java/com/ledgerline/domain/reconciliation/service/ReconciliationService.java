@@ -44,7 +44,9 @@ public class ReconciliationService {
         log.info("Starting global ledger reconciliation audit...");
 
         BigDecimal totalDebits = ledgerEntryRepository.sumTotalAmountByDirection(EntryDirection.DEBIT);
+        if (totalDebits == null) totalDebits = BigDecimal.ZERO.setScale(4);
         BigDecimal totalCredits = ledgerEntryRepository.sumTotalAmountByDirection(EntryDirection.CREDIT);
+        if (totalCredits == null) totalCredits = BigDecimal.ZERO.setScale(4);
 
         boolean globalBalanced = totalDebits.compareTo(totalCredits) == 0;
 
@@ -56,7 +58,8 @@ public class ReconciliationService {
 
         for (Account acc : customerAccounts) {
             BigDecimal computedBalance = ledgerEntryRepository.calculateNetLiabilityBalanceForAccount(acc.getId());
-            BigDecimal materializedBalance = acc.getBalance();
+            if (computedBalance == null) computedBalance = BigDecimal.ZERO.setScale(4);
+            BigDecimal materializedBalance = acc.getBalance() != null ? acc.getBalance() : BigDecimal.ZERO.setScale(4);
 
             if (materializedBalance.compareTo(computedBalance) != 0) {
                 BigDecimal diff = materializedBalance.subtract(computedBalance);
@@ -98,7 +101,8 @@ public class ReconciliationService {
                 .orElseThrow(() -> new AccountNotFoundException("Account not found with ID: " + accountId));
 
         BigDecimal computedBalance = ledgerEntryRepository.calculateNetLiabilityBalanceForAccount(accountId);
-        BigDecimal materializedBalance = account.getBalance();
+        if (computedBalance == null) computedBalance = BigDecimal.ZERO.setScale(4);
+        BigDecimal materializedBalance = account.getBalance() != null ? account.getBalance() : BigDecimal.ZERO.setScale(4);
         BigDecimal diff = materializedBalance.subtract(computedBalance);
         boolean isBalanced = diff.compareTo(BigDecimal.ZERO) == 0;
 

@@ -22,7 +22,7 @@ try {
     $ready = $false
     for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Seconds 1
-        $ping = & $mysqladmin -P $port -u root ping 2>&1
+        $ping = & $mysqladmin -h 127.0.0.1 -P $port -u root ping 2>&1
         if ($ping -match "alive") {
             $ready = $true
             break
@@ -37,21 +37,21 @@ try {
     Write-Host "MySQL 8 is ALIVE and ready on port $port!"
 
     # Create clean test database
-    & $mysql -P $port -u root -e "CREATE DATABASE IF NOT EXISTS $dbname CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    & $mysql -h 127.0.0.1 -P $port -u root -e "CREATE DATABASE IF NOT EXISTS $dbname CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
     # Run the Spring Boot test against MySQL 8
     Write-Host "Running tests against MySQL 8..."
     $env:JAVA_HOME = "C:\Program Files\Java\jdk-22"
     Push-Location -Path "backend"
     try {
-        cmd /c "mvnw.cmd test `"-Dtest=*IntegrationTest`" `"-Dspring.datasource.url=jdbc:mysql://localhost:3307/$dbname`" `"-Dspring.datasource.username=root`" `"-Dspring.datasource.password=`" `"-Dspring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver`""
+        cmd /c "mvnw.cmd test `"-Dtest=*IntegrationTest`" `"-Dspring.datasource.url=jdbc:mysql://127.0.0.1:3307/$dbname`" `"-Dspring.datasource.username=root`" `"-Dspring.datasource.password=`" `"-Dspring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver`""
     } finally {
         Pop-Location
     }
 
 } finally {
     Write-Host "Stopping MySQL 8 instance..."
-    & $mysqladmin -P $port -u root shutdown 2>&1 | Out-Null
+    & $mysqladmin -h 127.0.0.1 -P $port -u root shutdown 2>&1 | Out-Null
     if ($process -and -not $process.HasExited) {
         $process.Kill()
     }

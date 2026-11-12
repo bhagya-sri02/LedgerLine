@@ -2,6 +2,10 @@ package com.ledgerline.domain.auth.service;
 
 import com.ledgerline.common.exception.BusinessException;
 import com.ledgerline.common.exception.UserAlreadyExistsException;
+import com.ledgerline.domain.account.entity.Account;
+import com.ledgerline.domain.account.entity.AccountStatus;
+import com.ledgerline.domain.account.entity.AccountType;
+import com.ledgerline.domain.account.repository.AccountRepository;
 import com.ledgerline.domain.audit.service.AuditService;
 import com.ledgerline.domain.auth.dto.AuthResponse;
 import com.ledgerline.domain.auth.dto.LoginRequest;
@@ -25,6 +29,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -36,14 +42,17 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider tokenProvider;
     private final AuditService auditService;
+    private final SecureRandom random = new SecureRandom();
 
     public AuthService(
             UserRepository userRepository,
             RoleRepository roleRepository,
+            AccountRepository accountRepository,
             PasswordEncoder passwordEncoder,
             AuthenticationManager authenticationManager,
             JwtTokenProvider tokenProvider,
@@ -51,6 +60,7 @@ public class AuthService {
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
+        this.accountRepository = accountRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
         this.tokenProvider = tokenProvider;
@@ -100,6 +110,24 @@ public class AuthService {
                 java.util.Map.of("role", targetRoleName.name())
         );
 
+        // Auto-provision initial CHECKING account for account holders
+        if (targetRoleName == RoleName.ROLE_ACCOUNT_HOLDER) {
+            String accNum;
+            do {
+                accNum = "ACC-" + (1000000000L + Math.abs(random.nextLong() % 9000000000L));
+            } while (accountRepository.findByAccountNumber(accNum).isPresent());
+
+            Account initialAccount = Account.builder()
+                    .accountNumber(accNum)
+                    .user(savedUser)
+                    .accountType(AccountType.CHECKING)
+                    .currency("USD")
+                    .balance(BigDecimal.ZERO.setScale(4))
+                    .status(AccountStatus.ACTIVE)
+                    .build();
+            accountRepository.save(initialAccount);
+        }
+
         return mapToUserProfileDto(savedUser);
     }
 
@@ -109,7 +137,9 @@ public class AuthService {
                 new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
         );
 
-        SecurityContextHolder.getContext().setAuthentication(authentication);
+        // Stateless JWT architecture: credentials verified; token returned in response.
+        // Clear server thread context to prevent thread-local authentication leakage.
+        SecurityContextHolder.clearContext();
 
         String jwt = tokenProvider.generateToken(authentication);
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
