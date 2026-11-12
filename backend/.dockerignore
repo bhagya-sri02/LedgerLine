@@ -1,0 +1,10 @@
+target/
+*.log
+.git/
+.gitignore
+.idea/
+.vscode/
+*.cmd
+run-phase3-tests.ps1
+package-backend.ps1
+
